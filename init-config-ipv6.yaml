@@ -4,7 +4,6 @@ localAPIEndpoint:
   advertiseAddress: 2001:db8:1234:5678::1
 nodeRegistration:
   criSocket: /var/run/dockershim.sock
-  name: node0001
   kubeletExtraArgs:
     cluster-dns: 2001:db8:1234:5678:8:3:0:a
     node-ip: 2001:db8:1234:5678::1
@@ -29,7 +28,7 @@ etcd:
     extraArgs:
       advertise-client-urls: https://[2001:db8:1234:5678::1]:2379
       initial-advertise-peer-urls: https://[2001:db8:1234:5678::1]:2380
-      initial-cluster: node0001=https://[2001:db8:1234:5678::1]:2380
+      initial-cluster: __HOSTNAME__=https://[2001:db8:1234:5678::1]:2380
       listen-client-urls: https://[2001:db8:1234:5678::1]:2379
       listen-peer-urls: https://[2001:db8:1234:5678::1]:2380
 kind: ClusterConfiguration

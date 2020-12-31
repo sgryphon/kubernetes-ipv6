@@ -54,7 +54,8 @@ sudo add-apt-repository \
   stable"
 
 # Install Docker CE
-sudo apt-get update && sudo apt-get install -y \
+sudo apt-get update
+sudo apt-get install -y \
   containerd.io=1.2.13-2 \
   docker-ce=5:19.03.11~3-0~ubuntu-$(lsb_release -cs) \
   docker-ce-cli=5:19.03.11~3-0~ubuntu-$(lsb_release -cs)
@@ -87,7 +88,7 @@ sudo systemctl enable docker
 
 Follow the instructions at https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
 
-The iptables configuration is already done above.
+The iptables configuration is already done above, and both overlay and br_filter should be installed with docker.
 
 The package installation excludes them from automatic updates:
 
@@ -113,14 +114,7 @@ sudo apt-mark hold kubelet kubeadm kubectl
 
 We need to use a `kubeadm init` configuration file for IPv6, as per the notes at https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/#config-file
 
-You can get a copy of the default configuration, including Kubelet, from kubeadm:
-
-```bash
-kubeadm config print init-defaults --component-configs KubeletConfiguration \
-  | tee init-defaults-config.yaml
-```
-
-A lot of the options can be deleted from the config as the default is fine, but we need to configure the options needed for IPv6 for each component in the Kubernetes stack. Details for this taken from the excellent talk by André Martins, https://www.youtube.com/watch?v=q0J722PCgvY
+You can get a copy of the default configuration, however a lot of the options can be deleted from the config as the default is fine. However we do need to configure the options needed for IPv6 for each component in the Kubernetes stack. Details for this taken from the excellent talk by André Martins, https://www.youtube.com/watch?v=q0J722PCgvY
 
 | Component | Details | IPv6 Options |
 | --------- | ------- | ------------ |
@@ -136,7 +130,7 @@ You can use either public assigned addresses or Unique Local Addresses (ULA), th
 
 For public addresses if you have been assigned a single `/64`, e.g. `2001:db8:1234:5678::/64`, you can use a plan like the following. This allows up to 65,000 Services, with 65,000 Nodes, and 65,000 Pods on each Node, and only uses a small fraction of the `/64` available.
 
-| Range | Description |
+| Plan Range | Description |
 | ----- | ----------- |
 | `2001:db8:1234:5678::1`          | Main address of the master node |
 | `2001:db8:1234:5678:8:3::/112`   | Service CIDR. Range allocated for Services, `/112` allows 65,000 Services. Maximum size is `/108`. |
@@ -179,7 +173,7 @@ etcd:
     extraArgs:
       advertise-client-urls: https://[2001:db8:1234:5678::1]:2379
       initial-advertise-peer-urls: https://[2001:db8:1234:5678::1]:2380
-      initial-cluster: node0001=https://[2001:db8:1234:5678::1]:2380
+      initial-cluster: __HOSTNAME__=https://[2001:db8:1234:5678::1]:2380
       listen-client-urls: https://[2001:db8:1234:5678::1]:2379
       listen-peer-urls: https://[2001:db8:1234:5678::1]:2380
 kind: ClusterConfiguration
@@ -197,10 +191,13 @@ healthzBindAddress: ::1
 kind: KubeletConfiguration
 ```
 
-You can also download the template and do a replace for your allocated /64 and master node. Use the following, but insert your /64 for `xxxx` and your master node for `yyyy`. Include the last segment of your /64 when replacing the master node to avoid conflict with the `::1` used for `healthzBindAddress`.
+You can also download the template and do a replace for your allocated `/64`, master node, and host name. Use the following, but insert your /64 for `xxxx` and your master node for `yyyy`. Include the last segment of your `/64` when replacing the master node to avoid conflict with the `::1` used for `healthzBindAddress`.
+
+Note that the `initial-cluster` parameter needs to match the node name, which defaults to the host name (you can check this in the dry run ClusterStatus apiEndpoints, or in the mark-control-plane section).
 
 ```bash
 curl -O https://raw.githubusercontent.com/sgryphon/kubernetes-ipv6/main/init-config-ipv6.yaml
+sed -i "s/__HOSTNAME__/$HOSTNAME/g" init-config-ipv6.yaml
 sed -i 's/2001:db8:1234:5678/xxxx:xxxx:xxxx:xxxx/g' init-config-ipv6.yaml
 sed -i 's/xxxx::1/xxxx::yyyy/g' init-config-ipv6.yaml
 ```
@@ -243,6 +240,18 @@ At this point you can checking the status. The etcd, apiserver, controller manag
 kubectl get all --all-namespaces
 ```
 
+### Aside: Manual modifications to the kubeadm config file
+
+You can get a copy of the default configuration, including Kubelet, from kubeadm:
+
+```bash
+kubeadm config print init-defaults --component-configs KubeletConfiguration \
+  | tee init-defaults-config.yaml
+```
+
+The IPv6 changes required are described above, and you can make any other changes you need for your cluster configuration.
+
+A good approach when making changes is to make a small change at a time and then do a dry-run to ensure the configuration is still valid.
 
 ## Deploy a Container Network Interface (CNI)
 
