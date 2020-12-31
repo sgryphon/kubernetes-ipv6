@@ -1,6 +1,6 @@
 # Kubernetes IPv6
 
-** DRAFT **
+**DRAFT**
 
 Configure a kubernetes cluster with IPv6 only.
 
@@ -44,7 +44,8 @@ sudo apt-get update
 sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common gnupg2
 
 # Add Docker's official GPG key:
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key --keyring /etc/apt/trusted.gpg.d/docker.gpg add -
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo apt-key --keyring /etc/apt/trusted.gpg.d/docker.gpg add -
 
 # Add the Docker apt repository:
 sudo add-apt-repository \
@@ -115,31 +116,32 @@ We need to use a `kubeadm init` configuration file for IPv6, as per the notes at
 You can get a copy of the default configuration, including Kubelet, from kubeadm:
 
 ```bash
-kubeadm config print init-defaults --component-configs KubeletConfiguration | tee init-defaults-config.yaml
+kubeadm config print init-defaults --component-configs KubeletConfiguration \
+  | tee init-defaults-config.yaml
 ```
 
 A lot of the options can be deleted from the config as the default is fine, but we need to configure the options needed for IPv6 for each component in the Kubernetes stack. Details for this taken from the excellent talk by André Martins, https://www.youtube.com/watch?v=q0J722PCgvY
 
 | Component | Details | IPv6 Options |
 | --------- | ------- | ------------ |
-| etcd | 53 CLI options, 5 relevant for IPv6 | --advertise-client-urls https://[fd00::0b]:2379 <br> --initial-advertise-peer-urls https://[fd00::0b]:2380 <br> --initial-cluster master=https://[fd00::0b]:2380 <br> --listen-client-urls https://[fd00::0b]:2379 <br> --listen-peer-urls https://[fd00::0b]:2380 <br> |
-| kube-apiserver | 120 CLI options, 5 relevant for IPv6 | --advertise-address=fd00::0b <br> --bind-address '::' <br> --etcd-servers=https://[fd00::0b]:2379 <br> --service-cluster-ip-range=fd03::/112 <br> --insecure-bind-address <br> |
-| kube-scheduler | 32 CLI options, 3 relevant for IPv6 | --bind-address '::' <br> --kubeconfig <br> --master <br> |
-| kube-controller-manager | 87 CLI options, 5 relevant for IPv6 | --allocate-node-cidrs=true <br> --bind-address '::' <br> --cluster-cidr=fd02::/80 <br> --node-cidr-mask-size 96 <br> --service-cluster-ip-range=fd03::/112 <br> |
-| kubelet | 160 options, 3 relevant for IPv6 | --bind-address '::' <br> --cluster-dns=fd03::a <br> --node-ip=fd00:0b <br> |
+| etcd | 53 CLI options, <br> 5 relevant for IPv6 | --advertise-client-urls https://[fd00::0b]:2379 <br> --initial-advertise-peer-urls https://[fd00::0b]:2380 <br> --initial-cluster master=https://[fd00::0b]:2380 <br> --listen-client-urls https://[fd00::0b]:2379 <br> --listen-peer-urls https://[fd00::0b]:2380 <br> |
+| kube-apiserver | 120 CLI options, <br> 5 relevant for IPv6 | --advertise-address=fd00::0b <br> --bind-address '::' <br> --etcd-servers=https://[fd00::0b]:2379 <br> --service-cluster-ip-range=fd03::/112 <br> --insecure-bind-address <br> |
+| kube-scheduler | 32 CLI options, <br> 3 relevant for IPv6 | --bind-address '::' <br> --kubeconfig <br> --master <br> |
+| kube-controller-manager | 87 CLI options, <br> 5 relevant for IPv6 | --allocate-node-cidrs=true <br> --bind-address '::' <br> --cluster-cidr=fd02::/80 <br> --node-cidr-mask-size 96 <br> --service-cluster-ip-range=fd03::/112 <br> |
+| kubelet | 160 options, <br> 3 relevant for IPv6 | --bind-address '::' <br> --cluster-dns=fd03::a <br> --node-ip=fd00:0b <br> |
 
 To set the options you need to use the address of your server and plan the ranges you will use for Services and Pods, and how they will be allocated to Nodes.
 
-You can use either public assigned addresses or Unique Local Addresses (ULA), the equivalent of private address ranges. The above examples use very short ULAs (e.g. fd00::0b) for demonstration purposes; a standard ULA will be a random fd00:: range, e.g. fd12:3456:789a::/48, of which you might use one or more subnets, e.g. fd12:3456:789a:1::/64.
+You can use either public assigned addresses or Unique Local Addresses (ULA), the equivalent of private address ranges. The above examples use very short ULAs (e.g. `fd00::0b`) for demonstration purposes; a standard ULA will be a random `fd00::` range, e.g. `fd12:3456:789a::/48`, of which you might use one or more subnets, e.g. `fd12:3456:789a:1::/64`.
 
-For public addresses if you have been assigned a single /64, e.g. 2001:db8:1234:5678::/64, you can use a plan like the following. This allows up to 65,000 Services, with 65,000 Nodes, and 65,000 Pods on each Node, and only uses a small fraction of the /64 available.
+For public addresses if you have been assigned a single `/64`, e.g. `2001:db8:1234:5678::/64`, you can use a plan like the following. This allows up to 65,000 Services, with 65,000 Nodes, and 65,000 Pods on each Node, and only uses a small fraction of the `/64` available.
 
 | Range | Description |
 | ----- | ----------- |
-| 2001:db8:1234:5678::1          | Main address of the master node |
-| 2001:db8:1234:5678:8:3::/112   | Service CIDR. Range allocated for Services, /112 allows 65,000 Services. Maximum size is /108. |
-| 2001:db8:1234:5678:8:2::/96    | Node CIDR. Range used to allocate subnets to Nodes. |
-| 2001:db8:1234:5678:8:2:x:x000/116 | Allocate a /116 CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 1 million Nodes, with 4,000 Pods on each. Calico block range is 116-128 (default 122, or 64 Pods per Node). |
+| `2001:db8:1234:5678::1`          | Main address of the master node |
+| `2001:db8:1234:5678:8:3::/112`   | Service CIDR. Range allocated for Services, `/112` allows 65,000 Services. Maximum size is `/108`. |
+| `2001:db8:1234:5678:8:2::/96`    | Node CIDR. Range used to allocate subnets to Nodes. |
+| `2001:db8:1234:5678:8:2:x:x000/116` | Allocate a `/116` CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 1 million Nodes, with 4,000 Pods on each. Calico block range is 116-128 (default `/122`, or 64 Pods per Node). |
 
 We want to customise the control plane with the IPv6 configuration settings from above, and also configure the cgroup driver. https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/
 
@@ -310,7 +312,7 @@ Scroll down a bit more to find spec > template > spec > containers > name: calic
   value: "120"
 ```
 
-The documents say that Calico will pick up the IP pool from kubeadm, but it didn't work for me and I got the default CIDR fda0:95bd:f195::/48 (a random /48) with the default block size 122 (which is 6 bits, or 64 pods per node), as per https://docs.projectcalico.org/reference/node/configuration
+The documents say that Calico will pick up the IP pool from kubeadm, but it didn't work for me and I got the default CIDR `fda0:95bd:f195::/48`(a random `/48`) with the default block size `/122` (which is 64 pods per node), as per https://docs.projectcalico.org/reference/node/configuration
 
 
 ## Add management components
