@@ -3670,6 +3670,10 @@ spec:
               value: "hash"
             - name: CALICO_IPV4POOL_IPIP
               value: "Never"
+            - name: CALICO_IPV6POOL_CIDR
+              value: "2001:db8:1234:5678:8:2::/96"
+            - name: CALICO_IPV6POOL_BLOCK_SIZE
+              value: "116"
           securityContext:
             privileged: true
           resources:
