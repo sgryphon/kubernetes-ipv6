@@ -1,5 +1,7 @@
 # Kubernetes IPv6
 
+** DRAFT **
+
 Configure a kubernetes cluster with IPv6 only.
 
 IPv6 only infrastructure deployments allow for simpler management and maintenance than dual-stack, with IPv4 access provided via a front end reverse proxy or content distribution network (CDN).
@@ -137,7 +139,7 @@ For public addresses if you have been assigned a single /64, e.g. 2001:db8:1234:
 | 2001:db8:1234:5678::1          | Main address of the master node |
 | 2001:db8:1234:5678:8:3::/112   | Service CIDR. Range allocated for Services, /112 allows 65,000 Services. Maximum size is /108. |
 | 2001:db8:1234:5678:8:2::/96    | Node CIDR. Range used to allocate subnets to Nodes. |
-| 2001:db8:1234:5678:8:2:x:0/112 | Allocate a /112 CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allow 65,000 Nodes, with 65,000 Pods on each. |
+| 2001:db8:1234:5678:8:2:x:x000/116 | Allocate a /116 CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 1 million Nodes, with 4,000 Pods on each. Calico block range is 116-128 (default 122, or 64 Pods per Node). |
 
 We want to customise the control plane with the IPv6 configuration settings from above, and also configure the cgroup driver. https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/
 
@@ -167,7 +169,7 @@ controllerManager:
     allocate-node-cidrs: 'true'
     bind-address: '::'
     cluster-cidr: 2001:db8:1234:5678:8:2::/96
-    node-cidr-mask-size: '112'
+    node-cidr-mask-size: '116'
     service-cluster-ip-range: 2001:db8:1234:5678:8:3::/112
 etcd:
   local:
@@ -226,7 +228,10 @@ You need to follow the instructions to get kubectl to work as a non-root user, e
 For a single node cluster you also want to be able to schedule Pods on the master, so need to un-taint it.
 
 ```bash
-export KUBECONFIG=/etc/kubernetes/admin.conf
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
 kubectl taint nodes --all node-role.kubernetes.io/master-
 ```
 
@@ -247,6 +252,7 @@ A modified configuration file with the IPv6 changes already applied is available
 
 ```bash
 curl -O https://raw.githubusercontent.com/sgryphon/kubernetes-ipv6/main/calico-ipv6.yaml
+sed -i 's/2001:db8:1234:5678/xxxx:xxxx:xxxx:xxxx/g' calico-ipv6.yaml
 ```
 
 Then apply the configuration, which will set up all the custom object definitions and the calico service:
@@ -298,9 +304,13 @@ Scroll down a bit more to find spec > template > spec > containers > name: calic
   value: "hash"
 - name: CALICO_IPV4POOL_IPIP
   value: "Never"
+- name: CALICO_IPV6POOL_CIDR
+  value: "2001:db8:1234:5678:8:2::/96"
+- name: CALICO_IPV6POOL_BLOCK_SIZE
+  value: "120"
 ```
 
-Don't set CALICO_IPV6POOL_CIDR, as it will pick it up from kubeadm.
+The documents say that Calico will pick up the IP pool from kubeadm, but it didn't work for me and I got the default CIDR fda0:95bd:f195::/48 (a random /48) with the default block size 122 (which is 6 bits, or 64 pods per node), as per https://docs.projectcalico.org/reference/node/configuration
 
 
 ## Add management components
@@ -432,4 +442,11 @@ Then, to get a login token:
 ```bash
 kubectl -n kubernetes-dashboard describe secret $(kubectl -n kubernetes-dashboard get secret | grep admin-user | awk '{print $1}')
 ```
+
+## Putting it all together
+
+TODO
+
+... configure an ingress specification for the dashboard and get it working
+
 
