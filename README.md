@@ -1,4 +1,4 @@
-# Kubernetes IPv6
+# Kubernetes with IPv6 only (on Ubuntu)
 
 **DRAFT**
 
@@ -134,8 +134,8 @@ For public addresses if you have been assigned a single `/64`, e.g. `2001:db8:12
 | ----- | ----------- |
 | `2001:db8:1234:5678::1`          | Main address of the master node |
 | `2001:db8:1234:5678:8:3::/112`   | Service CIDR. Range allocated for Services, `/112` allows 65,000 Services. Maximum size is `/108`. |
-| `2001:db8:1234:5678:8:2::/96`    | Node CIDR. Range used to allocate subnets to Nodes. |
-| `2001:db8:1234:5678:8:2:x:x000/116` | Allocate a `/116` CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 1 million Nodes, with 4,000 Pods on each. Calico block range is 116-128 (default `/122`, or 64 Pods per Node). |
+| `2001:db8:1234:5678:8:2::/104`   | Node CIDR. Range used to allocate subnets to Nodes. Maximum difference between Node range and block size (below) is 16. |
+| `2001:db8:1234:5678:8:2:xx:xx00/120` | Allocate a `/120` CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 65,000 Nodes, with 250 Pods on each. Calico block range is 116-128 (default `/122`, or 64 Pods per Node). |
 
 We want to customise the control plane with the IPv6 configuration settings from above, and also configure the cgroup driver. https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/
 
@@ -164,8 +164,8 @@ controllerManager:
   extraArgs:
     allocate-node-cidrs: 'true'
     bind-address: '::'
-    cluster-cidr: 2001:db8:1234:5678:8:2::/96
-    node-cidr-mask-size: '116'
+    cluster-cidr: 2001:db8:1234:5678:8:2::/104
+    node-cidr-mask-size: '120'
     service-cluster-ip-range: 2001:db8:1234:5678:8:3::/112
 etcd:
   local:
@@ -198,6 +198,7 @@ Note that the `initial-cluster` parameter needs to match the node name, which de
 ```bash
 curl -O https://raw.githubusercontent.com/sgryphon/kubernetes-ipv6/main/init-config-ipv6.yaml
 sed -i "s/__HOSTNAME__/$HOSTNAME/g" init-config-ipv6.yaml
+
 sed -i 's/2001:db8:1234:5678/xxxx:xxxx:xxxx:xxxx/g' init-config-ipv6.yaml
 sed -i 's/xxxx::1/xxxx::yyyy/g' init-config-ipv6.yaml
 ```
@@ -263,6 +264,7 @@ A modified configuration file with the IPv6 changes already applied is available
 
 ```bash
 curl -O https://raw.githubusercontent.com/sgryphon/kubernetes-ipv6/main/calico-ipv6.yaml
+
 sed -i 's/2001:db8:1234:5678/xxxx:xxxx:xxxx:xxxx/g' calico-ipv6.yaml
 ```
 
@@ -316,7 +318,7 @@ Scroll down a bit more to find spec > template > spec > containers > name: calic
 - name: CALICO_IPV4POOL_IPIP
   value: "Never"
 - name: CALICO_IPV6POOL_CIDR
-  value: "2001:db8:1234:5678:8:2::/96"
+  value: "2001:db8:1234:5678:8:2::/104"
 - name: CALICO_IPV6POOL_BLOCK_SIZE
   value: "120"
 ```

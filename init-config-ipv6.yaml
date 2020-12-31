@@ -19,8 +19,8 @@ controllerManager:
   extraArgs:
     allocate-node-cidrs: 'true'
     bind-address: '::'
-    cluster-cidr: 2001:db8:1234:5678:8:2::/96
-    node-cidr-mask-size: '116'
+    cluster-cidr: 2001:db8:1234:5678:8:2::/104
+    node-cidr-mask-size: '120'
     service-cluster-ip-range: 2001:db8:1234:5678:8:3::/112
 etcd:
   local:
