@@ -114,10 +114,10 @@ sudo apt-mark hold kubelet kubeadm kubectl
 
 We need to use a `kubeadm init` configuration file for IPv6, as per the notes at https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-init/#config-file
 
-You can get a copy of the default configuration, however a lot of the options can be deleted from the config as the default is fine. However we do need to configure the options needed for IPv6 for each component in the Kubernetes stack. Details for this taken from the excellent talk by André Martins, https://www.youtube.com/watch?v=q0J722PCgvY
+You can get a copy of the default configuration, however a lot of the options can be deleted from the file as the default is fine. However we do need to configure the options needed for IPv6 for each component in the Kubernetes stack. Details for this taken from the excellent talk by André Martins, https://www.youtube.com/watch?v=q0J722PCgvY
 
-| Component | Details | IPv6 Options |
-| --------- | ------- | ------------ |
+| Component | Details | IPv6 Options with example |
+| --------- | ------- | ------------------------- |
 | etcd | 53 CLI options, <br> 5 relevant for IPv6 | --advertise-client-urls https://[fd00::0b]:2379 <br> --initial-advertise-peer-urls https://[fd00::0b]:2380 <br> --initial-cluster master=https://[fd00::0b]:2380 <br> --listen-client-urls https://[fd00::0b]:2379 <br> --listen-peer-urls https://[fd00::0b]:2380 <br> |
 | kube-apiserver | 120 CLI options, <br> 5 relevant for IPv6 | --advertise-address=fd00::0b <br> --bind-address '::' <br> --etcd-servers=https://[fd00::0b]:2379 <br> --service-cluster-ip-range=fd03::/112 <br> --insecure-bind-address <br> |
 | kube-scheduler | 32 CLI options, <br> 3 relevant for IPv6 | --bind-address '::' <br> --kubeconfig <br> --master <br> |
@@ -126,20 +126,22 @@ You can get a copy of the default configuration, however a lot of the options ca
 
 To set the options you need to use the address of your server and plan the ranges you will use for Services and Pods, and how they will be allocated to Nodes.
 
-You can use either public assigned addresses or Unique Local Addresses (ULA), the equivalent of private address ranges. The above examples use very short ULAs (e.g. `fd00::0b`) for demonstration purposes; a standard ULA will be a random `fd00::` range, e.g. `fd12:3456:789a::/48`, of which you might use one or more subnets, e.g. `fd12:3456:789a:1::/64`.
+You can use either public assigned addresses (recommended if available) or Unique Local Addresses (ULA, the equivalent of private address ranges, will require custom routing or NAT).
 
-For public addresses if you have been assigned a single `/64`, e.g. `2001:db8:1234:5678::/64`, you can use a plan like the following. This allows up to 65,000 Services, with 65,000 Nodes, and 65,000 Pods on each Node, and only uses a small fraction of the `/64` available.
+The above examples use very short ULAs (e.g. `fd00::0b`) for demonstration purposes; a standard ULA will be a random `fd00::` range, e.g. `fd12:3456:789a::/48`, of which you might use one or more subnets, e.g. `fd12:3456:789a:1::/64`.
+
+For public addresses if you have been assigned a single `/64`, e.g. `2001:db8:1234:5678::/64`, you can use a plan like the following. This allows up to 65,000 Services, with 65,000 Nodes, and 250 Pods on each Node, and only uses a small fraction of the `/64` available.
 
 | Plan Range | Description |
 | ----- | ----------- |
 | `2001:db8:1234:5678::1`          | Main address of the master node |
-| `2001:db8:1234:5678:8:3::/112`   | Service CIDR. Range allocated for Services, `/112` allows 65,000 Services. Maximum size is `/108`. |
-| `2001:db8:1234:5678:8:2::/104`   | Node CIDR. Range used to allocate subnets to Nodes. Maximum difference between Node range and block size (below) is 16. |
-| `2001:db8:1234:5678:8:2:xx:xx00/120` | Allocate a `/120` CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 65,000 Nodes, with 250 Pods on each. Calico block range is 116-128 (default `/122`, or 64 Pods per Node). |
+| `2001:db8:1234:5678:8:3::/112`   | Service CIDR. Range allocated for Services, `/112` allows 65,000 Services. Maximum size in Kubernetes is `/108`. |
+| `2001:db8:1234:5678:8:2::/104`   | Node CIDR. Range used to allocate subnets to Nodes. Maximum difference in Kubernates between Node range and block size (below) is 16 (Calico allows any size). |
+| `2001:db8:1234:5678:8:2:xx:xx00/120` | Allocate a `/120` CIDR from the Node CIDR range to each node; each Pod gets an address from the range. This allows 65,000 Nodes, with 250 Pods on each. Calico block range is 116-128 with default `/122` for 64 Pods per Node (Kubernetes allows larger subnets). |
 
 We want to customise the control plane with the IPv6 configuration settings from above, and also configure the cgroup driver. https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/control-plane-flags/
 
-This gives us the following configuration file template (see below for how to download):
+This gives us the following configuration file template, where you can insert your address ranges and host name (see below for how to download and do this):
 
 ```yaml
 apiVersion: kubeadm.k8s.io/v1beta2
@@ -191,9 +193,9 @@ healthzBindAddress: ::1
 kind: KubeletConfiguration
 ```
 
-You can also download the template and do a replace for your allocated `/64`, master node, and host name. Use the following, but insert your /64 for `xxxx` and your master node for `yyyy`. Include the last segment of your `/64` when replacing the master node to avoid conflict with the `::1` used for `healthzBindAddress`.
+You can also download the template and do a replace for your host name (node name), allocated `/64`, and master node address. Use the following, but insert your /64 for `xxxx` and your master node for `yyyy`. Include the last segment of your `/64` when replacing the master node to avoid conflict with the `::1` used for `healthzBindAddress`.
 
-Note that the `initial-cluster` parameter needs to match the node name, which defaults to the host name (you can check this in the dry run ClusterStatus apiEndpoints, or in the mark-control-plane section).
+Note that the `initial-cluster` parameter (the value replaced) needs to match the generated node name, which defaults to the host name, so we insert the host name into the config file (you can check this in the dry run ClusterStatus apiEndpoints, or in the mark-control-plane section, in case the node name differs).
 
 ```bash
 curl -O https://raw.githubusercontent.com/sgryphon/kubernetes-ipv6/main/init-config-ipv6.yaml
@@ -280,7 +282,19 @@ After this you can check everything is running. If successful, then there should
 kubectl get all --all-namespaces
 ```
 
-### Aside: Manual modifications to the calico file
+### Installing calicoctl
+
+For future administration of calico, you can also install calicoctl. https://docs.projectcalico.org/getting-started/clis/calicoctl/install
+
+For example, to install calicoctl as a Pod:
+
+```bash
+kubectl apply -f https://docs.projectcalico.org/manifests/calicoctl.yaml
+alias calicoctl="kubectl exec -i -n kube-system calicoctl -- /calicoctl"
+calicoctl get profiles -o wide
+```
+
+### Aside: Manual modifications to the calico install file
 
 An already modified version is available for download as above, otherwise you can make the changes yourself (e.g. if calico updates the main manifest).
 
@@ -326,9 +340,51 @@ Scroll down a bit more to find spec > template > spec > containers > name: calic
 The documents say that Calico will pick up the IP pool from kubeadm, but it didn't work for me and I got the default CIDR `fda0:95bd:f195::/48`(a random `/48`) with the default block size `/122` (which is 64 pods per node), as per https://docs.projectcalico.org/reference/node/configuration
 
 
+## Troubleshooting
+
+If the initial installation using kubeadm fails, you may need to look at the container runtime to make sure there are no problems (I had issues when the initial cluster name didn't match the host name).
+
+```bash
+docker ps -a
+docker logs CONTAINERID
+```
+
+If `kubectl` is working (a partially working cluster), you can also examine the different elements, e.g.
+
+```bash
+kubectl get all --all-namespaces
+kubectl describe service kube-dns -n kube-system
+kubectl describe pod coredns-74ff55c5b-hj2gm -n kube-system
+```
+
+You can look at the logs of individual components:
+
+```bash
+kubectl logs --namespace=kube-system kube-controller-manager-hostname.com
+```
+
+For troubleshooting from within the cluster, install a terminal (the Kubernetes examples use `busybox`, but also `dnsutils` and full `alpine`).
+
+```bash
+kubectl apply -f https://k8s.io/examples/admin/dns/busybox.yaml
+kubectl exec -ti busybox -- nslookup kubernetes.default
+```
+
+With full public IPv6 addresses you can communicate directly with a pod, without needed Network Address Translation or any encapsulation:
+
+```bash
+kubectl get pods busybox -o=custom-columns='NAME:metadata.name','STATUS:status.phase','IP:status.podIP' 
+ping -c 4 `kubectl get pods busybox -o=custom-columns='IP:status.podIP' --no-headers`
+kubectl exec -ti busybox -- ping -c 4 `hostname -i`
+```
+
+For more details, see https://kubernetes.io/docs/tasks/debug-application-cluster/
+
+
 ## Add management components
 
 At this point you should be able reach components such a the API service via a browser `https://[2001:db8:1234:5678::1]:6443/`, although without permissions it will only return an error, although at least that shows it is up and running.
+
 
 ### Helm (package manager)
 
@@ -426,15 +482,16 @@ helm install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard
 To log in you will need to create a user, following the instructions at https://github.com/kubernetes/dashboard/blob/master/docs/user/access-control/creating-sample-user.md
 
 ```bash
-cat <<EOF | kubectl apply -f -
+cat <<EOF | tee admin-user-account.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: admin-user
-  namespace: kubernetes-dashboard
 EOF
 
-cat <<EOF | kubectl apply -f -
+kubectl apply -f admin-user-account.yaml
+
+cat <<EOF | tee admin-user-binding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -446,14 +503,16 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: admin-user
-  namespace: kubernetes-dashboard
+  namespace: default
 EOF
+
+kubectl apply -f admin-user-binding.yaml
 ```
 
 Then, to get a login token:
 
 ```bash
-kubectl -n kubernetes-dashboard describe secret $(kubectl -n kubernetes-dashboard get secret | grep admin-user | awk '{print $1}')
+kubectl describe secret `kubectl get secret | grep admin-user | awk '{print $1}'`
 ```
 
 ## Putting it all together
