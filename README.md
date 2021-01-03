@@ -16,6 +16,7 @@ There are several main steps required:
 1. Install Kubernetes components
 1. Set up the Kubernetes control plane
 1. Deploy a Container Network Interface (CNI)
+1. Configure routing
 1. Add management components
 
 
@@ -290,7 +291,13 @@ For example, to install calicoctl as a Pod:
 
 ```bash
 kubectl apply -f https://docs.projectcalico.org/manifests/calicoctl.yaml
+
+# Save an alias in bash config, and then load it
+cat <<EOF | tee -a ~/.bash_aliases
 alias calicoctl="kubectl exec -i -n kube-system calicoctl -- /calicoctl"
+EOF
+. ~/.bash_aliases
+
 calicoctl get profiles -o wide
 ```
 
@@ -340,6 +347,69 @@ Scroll down a bit more to find spec > template > spec > containers > name: calic
 The documents say that Calico will pick up the IP pool from kubeadm, but it didn't work for me and I got the default CIDR `fda0:95bd:f195::/48`(a random `/48`) with the default block size `/122` (which is 64 pods per node), as per https://docs.projectcalico.org/reference/node/configuration
 
 
+## Configure routing
+
+Once the networking is configured you should have all the cluster components talking to each other.
+
+You can test this by installing a Pod running a basic terminal instance (the Kubernetes examples use `busybox`, but also `dnsutils` and full `alpine`).
+
+```bash
+kubectl apply -f https://k8s.io/examples/admin/dns/busybox.yaml
+kubectl exec -ti busybox -- nslookup kubernetes.default
+```
+
+You can check communication (ping) between the host and Pods, and between Pods:
+
+```bash
+kubectl get pods --all-namespaces -o \
+  custom-columns='NAMESPACE:metadata.namespace','NAME:metadata.name','STATUS:status.phase','IP:status.podIP' 
+ping -c 2 `kubectl get pods busybox -o=custom-columns='IP:status.podIP' --no-headers`
+kubectl exec -ti busybox -- ping -c 2 `hostname -i`
+kubectl exec -ti busybox -- ping -c 2 \
+  `kubectl get pods -n kube-system -o=custom-columns='NAME:metadata.name','IP:status.podIP' | grep -m 1 coredns | awk '{print $2}'`
+```
+
+However communication with the rest of the Internet won't work unless incoming routes have been configured.
+
+Your hosting provider may route the entire /64 to your machine, or may simply make the range available to you and be expecting your server to respond to Neighbor Discovery Protocol solicitation messages with advertisement of the addresses it can handle.
+
+Simply adding the address to the host would advertise it, but also handle the packets directly (INPUT), rather than forwarding to the cluster. To advertise the cluster addresses in response to solicitation you need to use a Neighbour Discovery Protocol proxy.
+
+Linux does have some limited ability to proxy NDP, but it is limited to individual addresses; a better solution is to use `ndppd`, the Neighbor Discovery Protocol Proxy Daemon, which supports proxying of entire ranges of addresses, https://github.com/DanielAdolfsson/ndppd
+
+This will respond to neighbor solicitation requests with advertisement of the Pod and Service addresses, allowing the upstream router to know to send those packets to the host. Use your addresses ranges in the configuration, advertising the Pod `/104` range automatically based on known routes, and the entire `/112` Service range.
+
+```bash
+# Install
+sudo apt update
+sudo apt install -y ndppd
+
+# Create config
+cat <<EOF | sudo tee /etc/ndppd.conf
+proxy eth0 {
+    rule 2001:db8:1234:5678:8:2::/104 {
+        auto
+    }
+    rule 2001:db8:1234:5678:8:3::/112 {
+        static
+    }
+}
+EOF
+
+# Restart
+sudo systemctl daemon-reload
+sudo systemctl restart ndppd
+
+# Set to run on boot
+sudo systemctl enable ndppd
+```
+
+Once running you can test that communication works between Pods and the Internet:
+
+```bash
+kubectl exec -ti busybox -- ping -c 1 2001:4860:4860::8888
+```
+ 
 ## Troubleshooting
 
 If the initial installation using kubeadm fails, you may need to look at the container runtime to make sure there are no problems (I had issues when the initial cluster name didn't match the host name).
@@ -373,7 +443,8 @@ kubectl exec -ti busybox -- nslookup kubernetes.default
 With full public IPv6 addresses you can communicate directly with a pod, without needed Network Address Translation or any encapsulation:
 
 ```bash
-kubectl get pods busybox -o=custom-columns='NAME:metadata.name','STATUS:status.phase','IP:status.podIP' 
+kubectl get pods --all-namespaces -o \
+  custom-columns='NAMESPACE:metadata.namespace','NAME:metadata.name','STATUS:status.phase','IP:status.podIP' 
 ping -c 4 `kubectl get pods busybox -o=custom-columns='IP:status.podIP' --no-headers`
 kubectl exec -ti busybox -- ping -c 4 `hostname -i`
 ```
@@ -413,6 +484,13 @@ kubectl get service --all-namespaces
 ```
 
 You can then use a browser to check the mapped HTTPS (443) port, e.g. `https://[2001:db8:1234:5678::1]:31429/`, although you will just get a nginx 404 page until you have services to expose.
+
+With IPv6, the deployment can be checked by directly accessing the address of the service:
+
+```
+kubectl get services
+curl -k https://[`kubectl get services | grep kubernetes-dashboard | awk '{print $3}'`]
+```
 
 ### Certificate manager (automatic HTTPS)
 
@@ -477,6 +555,13 @@ To manage the Kubernetes cluster install Dashboard, via Helm. https://artifacthu
 ```bash
 helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
 helm install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard
+```
+
+With IPv6, the deployment can be checked by directly accessing the address of the service:
+
+```
+kubectl get services
+curl -k https://[`kubectl get services | grep kubernetes-dashboard | awk '{print $3}'`]
 ```
 
 To log in you will need to create a user, following the instructions at https://github.com/kubernetes/dashboard/blob/master/docs/user/access-control/creating-sample-user.md
