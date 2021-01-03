@@ -410,6 +410,8 @@ kubectl exec -ti busybox -- ping -c 2 2001:4860:4860::8888
 
 ### Routing alternatives
 
+If `ndppd` does not suite your needs, then you can look at the basic NDP proxy support in Linux, or at the BGP support in Calico.
+
 #### Basic NDP proxy
 
 Linux directly supports NDP proxying for individual addresses, although the functionality is considered deprecated:
