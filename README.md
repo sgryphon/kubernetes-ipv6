@@ -677,7 +677,9 @@ kubectl describe secret `kubectl get secret | grep admin-user | awk '{print $1}'
 
 ## Putting it all together
 
-To use HTTPS you will need to assign a domain name for the dashboard, e.g. `https://kube001-dashboard.example.com`
+Note that the initial setup uses a staging certificate from Let's Encrypt, as the production servers have tight quotas and if there is a problem you don't want to be mixing up configuration issues with quota limit issues.
+
+To use HTTPS (which you should be) you will need to assign a domain name for the dashboard, e.g. `https://kube001-dashboard.example.com`
 
 You can then configure an ingress specification, which cert-manager will use to get a certificate, allowing nginx to reverse proxy and serve the dashboard pages.
 
@@ -698,7 +700,7 @@ Name:	kube001-ingress.example.com
 Address: 2001:db8:1234:5678:8:3:0:d3ef
 ```
 
-Create a staging ingress for the dashboard, with annotations to use the cert-manager issuer we created, and that the back end protocol is HTTPS:
+Create a staging ingress for the dashboard, with annotations to use the cert-manager issuer we created, and that the back end protocol is HTTPS. There are many other annotations you can use to configure the nginx ingress, https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/.
 
 ```bash
 cat <<EOF | sudo tee dashboard-ingress-staging.yaml
@@ -727,7 +729,7 @@ spec:
     secretName: dashboard-ingress-cert
 EOF
 
-kubectl create -f dashboard-ingress-staging.yaml
+kubectl apply -f dashboard-ingress-staging.yaml
 ```
 
 Checking the created ingress, it should have a notification from cert-manager that the certificate was correctly created:
@@ -737,4 +739,75 @@ kubectl describe ingress dashboard-ingress
 ```
 
 If everything has worked correctly you should be able to visit `https://kube001-dashboard.example.com`, although there will be a certificate warning you need to bypass as it is only a Staging certificate at this point. Use the login token from above and you can access the kubernetes dashboard.
+
+### Production certificate
+
+Once you have the staging certificate from Let's Encrypt working, you can change the configuration over to use a production certificate.
+
+Create a production issuer:
+
+```bash
+cat <<EOF | sudo tee letsencrypt-production.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    # You must replace this email address with your own.
+    # Let's Encrypt will use this to contact you about expiring
+    # certificates, and issues related to your account.
+    email: user@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      # Secret resource that will be used to store the account's private key.
+      name: letsencrypt-production
+    # Add a single challenge solver, HTTP01 using nginx
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+EOF
+
+kubectl create -f letsencrypt-production.yaml
+
+kubectl describe clusterissuer letsencrypt-production
+```
+
+Change the dashboard ingress from using the staging issuer to the production issuer:
+
+```bash
+cat <<EOF | sudo tee dashboard-ingress-production.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  name: dashboard-ingress
+spec:
+  rules:
+  - host: kube001-dashboard.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubernetes-dashboard
+            port: 
+              number: 443
+  tls: 
+  - hosts:
+    - kube001-dashboard.example.com
+    secretName: dashboard-ingress-cert
+EOF
+
+kubectl apply -f dashboard-ingress-production.yaml
+
+kubectl describe ingress dashboard-ingress
+```
+
+Close and reopen the dashboard page, `https://kube001-dashboard.example.com`, and you should now have a valid working certificate.
+
 
