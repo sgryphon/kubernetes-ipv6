@@ -377,7 +377,7 @@ Simply adding the address to the host would advertise it, but also handle the pa
 
 Linux does have some limited ability to proxy NDP, but it is limited to individual addresses; a better solution is to use `ndppd`, the Neighbor Discovery Protocol Proxy Daemon, which supports proxying of entire ranges of addresses, https://github.com/DanielAdolfsson/ndppd
 
-This will respond to neighbor solicitation requests with advertisement of the Pod and Service addresses, allowing the upstream router to know to send those packets to the host. Use your addresses ranges in the configuration, advertising the Pod `/104` range automatically based on known routes, and the entire `/112` Service range.
+This will respond to neighbor solicitation requests with advertisement of the Pod and Service addresses, allowing the upstream router to know to send those packets to the host. Use your addresses ranges in the configuration, advertising the Pod `/104` range automatically based on known routes, which includes individual pods (from `ip -6 route show`), and the entire `/112` Service range (as a static range).
 
 ```bash
 # Install
@@ -407,7 +407,29 @@ sudo systemctl enable ndppd
 Once running you can test that communication works between Pods and the Internet:
 
 ```bash
-kubectl exec -ti busybox -- ping -c 1 2001:4860:4860::8888
+kubectl exec -ti busybox -- ping -c 2 2001:4860:4860::8888
+```
+
+### Routing alternative - BGP
+
+Calico support BGP, and runs full mesh BGP between nodes in the cluster. See https://docs.projectcalico.org/networking/bgp
+
+For dynamic communication of routes to upstream routers, you can peer Calico using BGP (Note: based on documentation; not tested). Replace the values with those for your hosting provider, if they allow it.
+
+```bash
+cat <<EOF | tee calico-bgppeer.yaml
+apiVersion: projectcalico.org/v3
+kind: BGPPeer
+metadata:
+  name: global-peer
+spec:
+  peerIP: 2001:db1:80::3
+  asNumber: 64123
+EOF
+
+calicoctl create -f calico-bgppeer.yaml
+
+calicoctl node status
 ```
 
 ## Troubleshooting
@@ -522,14 +544,17 @@ NGINX ingress will install with mapped ports (type LoadBalancer). You can check 
 kubectl get service --all-namespaces
 ```
 
-You can then use a browser to check the mapped HTTPS (443) port, e.g. `https://[2001:db8:1234:5678::1]:31429/`, although you will just get a nginx 404 page until you have services to expose.
+You can then use a browser to check the mapped HTTPS (443) port, e.g. `https://[2001:db8:1234:5678::1]:31429`, although you will just get a nginx 404 page until you have services to expose.
 
 With IPv6, the deployment can be checked by directly accessing the address of the service:
 
 ```
 kubectl get services
-curl -k https://[`kubectl get services | grep kubernetes-dashboard | awk '{print $3}'`]
+curl -k https://[`kubectl get service ingress-nginx-controller --no-headers | awk '{print $3}'`]
 ```
+
+If routing is set up correctly, you should also be able to access the Service address directly from the Internet, e.g. `https://[2001:db8:1234:5678:8:3:0:d3ef]/`, with the same nginx 404 page.
+
 
 ### Certificate manager (automatic HTTPS)
 
