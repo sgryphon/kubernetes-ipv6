@@ -1,7 +1,5 @@
 # Kubernetes with IPv6 only (on Ubuntu)
 
-**DRAFT**
-
 Configure a kubernetes cluster with IPv6 only.
 
 IPv6 only infrastructure deployments allow for simpler management and maintenance than dual-stack, with IPv4 access provided via a front end reverse proxy or content distribution network (CDN).
