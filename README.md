@@ -677,8 +677,64 @@ kubectl describe secret `kubectl get secret | grep admin-user | awk '{print $1}'
 
 ## Putting it all together
 
-TODO
+To use HTTPS you will need to assign a domain name for the dashboard, e.g. `https://kube001-dashboard.example.com`
 
-... configure an ingress specification for the dashboard and get it working
+You can then configure an ingress specification, which cert-manager will use to get a certificate, allowing nginx to reverse proxy and serve the dashboard pages.
 
+First get the IPv6 address of your ingress controller:
+
+```bash
+kubectl get service ingress-nginx-controller
+```
+
+Then set up a DNS host name for the dashboard pointing to the service address, and check it resolves (this example has the dashboard as a CNAME that points to ingress that has the AAAA record):
+
+```bash
+nslookup kube001-dashboard.example.com
+
+Non-authoritative answer:
+kube001-dashboard.example.com	canonical name = kube001-ingress.example.com.
+Name:	kube001-ingress.example.com
+Address: 2001:db8:1234:5678:8:3:0:d3ef
+```
+
+Create a staging ingress for the dashboard, with annotations to use the cert-manager issuer we created, and that the back end protocol is HTTPS:
+
+```bash
+cat <<EOF | sudo tee dashboard-ingress-staging.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+  name: dashboard-ingress
+spec:
+  rules:
+  - host: kube001-dashboard.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubernetes-dashboard
+            port: 
+              number: 443
+  tls: 
+  - hosts:
+    - kube001-dashboard.example.com
+    secretName: dashboard-ingress-cert
+EOF
+
+kubectl create -f dashboard-ingress-staging.yaml
+```
+
+Checking the created ingress, it should have a notification from cert-manager that the certificate was correctly created:
+
+```bash
+kubectl describe ingress dashboard-ingress
+```
+
+If everything has worked correctly you should be able to visit `https://kube001-dashboard.example.com`, although there will be a certificate warning you need to bypass as it is only a Staging certificate at this point. Use the login token from above and you can access the kubernetes dashboard.
 
