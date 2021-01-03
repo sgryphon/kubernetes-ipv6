@@ -371,9 +371,9 @@ kubectl exec -ti busybox -- ping -c 2 \
 
 However communication with the rest of the Internet won't work unless incoming routes have been configured.
 
-Your hosting provider may route the entire /64 to your machine, or may simply make the range available to you and be expecting your server to respond to Neighbor Discovery Protocol solicitation messages with advertisement of the addresses it can handle.
+Your hosting provider may route the entire /64 to your machine, or may simply make the range available to you and be expecting your server to respond to Neighbor Discovery Protocol (NDP) solicitation messages with advertisement of the addresses it can handle.
 
-Simply adding the address to the host would advertise it, but also handle the packets directly (INPUT), rather than forwarding to the cluster. To advertise the cluster addresses in response to solicitation you need to use a Neighbour Discovery Protocol proxy.
+Simply adding the address to the host would advertise it, but also handle the packets directly (INPUT), rather than forwarding to the cluster. To advertise the cluster addresses in response to solicitation you need to use a Neighbor Discovery Protocol proxy.
 
 Linux does have some limited ability to proxy NDP, but it is limited to individual addresses; a better solution is to use `ndppd`, the Neighbor Discovery Protocol Proxy Daemon, which supports proxying of entire ranges of addresses, https://github.com/DanielAdolfsson/ndppd
 
@@ -410,7 +410,18 @@ Once running you can test that communication works between Pods and the Internet
 kubectl exec -ti busybox -- ping -c 2 2001:4860:4860::8888
 ```
 
-### Routing alternative - BGP
+### Routing alternatives
+
+#### Basic NDP proxy
+
+Linux directly supports NDP proxying for individual addresses, although the functionality is considered deprecated:
+
+```
+sysctl -w net.ipv6.conf.eth0.proxy_ndp=1
+ip -6 neigh add proxy 2001:db8:1234:5678:8:2:42:1710 dev eth0
+```
+
+#### BGP
 
 Calico support BGP, and runs full mesh BGP between nodes in the cluster. See https://docs.projectcalico.org/networking/bgp
 
