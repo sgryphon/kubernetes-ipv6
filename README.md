@@ -409,7 +409,7 @@ Once running you can test that communication works between Pods and the Internet
 ```bash
 kubectl exec -ti busybox -- ping -c 1 2001:4860:4860::8888
 ```
- 
+
 ## Troubleshooting
 
 If the initial installation using kubeadm fails, you may need to look at the container runtime to make sure there are no problems (I had issues when the initial cluster name didn't match the host name).
@@ -433,24 +433,63 @@ You can look at the logs of individual components:
 kubectl logs --namespace=kube-system kube-controller-manager-hostname.com
 ```
 
-For troubleshooting from within the cluster, install a terminal (the Kubernetes examples use `busybox`, but also `dnsutils` and full `alpine`).
+For troubleshooting from within the cluster, deploy a Pod running terminal software (see above for details).
+
+To troubleshoot network routing issues you can config ip6tables tracing for ping messages in combination with tcpdump to check connections (see below for cleanup). For information on ip6tables debugging see https://backreference.org/2010/06/11/iptables-debugging/
 
 ```bash
-kubectl apply -f https://k8s.io/examples/admin/dns/busybox.yaml
-kubectl exec -ti busybox -- nslookup kubernetes.default
+# Enable tracing for ping (echo) messages
+ip6tables -t raw -A PREROUTING -p icmpv6 --icmpv6-type echo-request -j TRACE
+ip6tables -t raw -A PREROUTING -p icmpv6 --icmpv6-type echo-reply -j TRACE
+ip6tables -t raw -A OUTPUT -p icmpv6 --icmpv6-type echo-request -j TRACE
+ip6tables -t raw -A OUTPUT -p icmpv6 --icmpv6-type echo-reply -j TRACE
 ```
 
-With full public IPv6 addresses you can communicate directly with a pod, without needed Network Address Translation or any encapsulation:
+On an external server (e.g. home machine if you have IPv6), run `tcpdump` with a filter for the cluster addresses:
 
 ```bash
-kubectl get pods --all-namespaces -o \
-  custom-columns='NAMESPACE:metadata.namespace','NAME:metadata.name','STATUS:status.phase','IP:status.podIP' 
-ping -c 4 `kubectl get pods busybox -o=custom-columns='IP:status.podIP' --no-headers`
-kubectl exec -ti busybox -- ping -c 4 `hostname -i`
+sudo tcpdump 'ip6 and icmp6 and net 2001:db8:1234:5678::/64'
 ```
 
-For more details, see https://kubernetes.io/docs/tasks/debug-application-cluster/
+Then do a ping from the busybox Pod to the external server (replace the address with your external server, running tcpdump, address):
 
+```bash
+kubectl exec -ti busybox -- ping -c 1 2001:db8:9abc:def0::1001
+```
+
+To examine the ip6tables tracing, view the kernel log on the Kubernetes server:
+
+```bash
+tail -50 /var/log/kern.log
+```
+
+There will be a lot of rows of output, one for each ip6tables rule that the packets passed through (which is why we only send one ping).
+
+The kernel log should show the echo-request packets (`PROTO=ICMPv6 TYPE=128`) being forwarded from the source address of the Pod to the destination address of the external server.
+
+The `tcpdump` on the external server should show when the packet was received and the reply sent.
+
+The log should then show the echo-reply packets (`PROTO=ICMPv6 TYPE=128`) being forwarded from the source address of the external server to the destination address of the Pod.
+
+This should allow you to determine where the failure is. For example, before configuring routing using `ndppd` (see above), the network was not working, but I could see the outgoing forwarded packets, the reply on the external server, but not being received on the Kubernetes server (for forwarding to the Pod) -- the issue was the server was not advertising the address so the upstream router didn't know where to send the replies.
+
+For more details on Kubernetes troubleshooting, see https://kubernetes.io/docs/tasks/debug-application-cluster/
+
+### ip6tables tracing cleanup
+
+Tracing generates a lot of log messages, so make sure to clean up afterwards. Entries are deleted by row number, so check the values are correct before deleting.
+
+```
+ip6tables -t raw -L PREROUTING --line-numbers
+# Check the line numbers are correct before deleted; delete in reverse order
+ip6tables -t raw -D PREROUTING 3
+ip6tables -t raw -D PREROUTING 2
+
+ip6tables -t raw -L OUTPUT --line-numbers
+# Check the line numbers are correct before deleted; delete in reverse order
+ip6tables -t raw -D OUTPUT 3
+ip6tables -t raw -D OUTPUT 2
+```
 
 ## Add management components
 
